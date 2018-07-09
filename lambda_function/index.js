@@ -9,7 +9,7 @@ exports.handler = async (event, context) => {
     const responseForWaiting = await axios.get('https://api.chatwork.com/v2/me')
     const nextResetUnixTime = Number(responseForWaiting.headers['x-ratelimit-reset'])
     const waitUnixTime = nextResetUnixTime - moment().tz('Asia/Tokyo').unix() - 10
-    await new Promise(resolve => setTimeout(resolve, waitUnixTime * 10))
+    await new Promise(resolve => setTimeout(resolve, waitUnixTime * 1000))
 
     const responseForLogging = await axios.get('https://api.chatwork.com/v2/me')
     const limit = Number(responseForLogging.headers['x-ratelimit-limit'])
