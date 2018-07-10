@@ -19,23 +19,9 @@ resource "aws_iam_role" "this" {
 EOF
 }
 
-resource "aws_iam_role_policy" "this" {
-  name = "AllowDynamoDBUpdateChatWorkApiRateLimitTable"
-  role = "${aws_iam_role.this.id}"
-
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Action": "dynamodb:*",
-      "Effect": "Allow",
-      "Resource": "arn:aws:dynamodb:*:*:table/ChatWorkApiRateLimit"
-    }
-  ]
-}
-EOF
+resource "aws_iam_role_policy_attachment" "terraform_lambda_iam_policy_basic_execution" {
+  role       = "${aws_iam_role.this.id}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # Lambda Function
@@ -64,7 +50,7 @@ resource "aws_lambda_function" "this" {
 # CloudWatch Event
 resource "aws_cloudwatch_event_rule" "this" {
   name                = "schedule-check-chatwork-api-limit"
-  description         = "Schedule the limit number of the ChatWork API"
+  description         = "Schedule the remaining number of the ChatWork API"
   schedule_expression = "rate(10 minutes)"
 }
 
@@ -81,15 +67,36 @@ resource "aws_lambda_permission" "this" {
   source_arn    = "${aws_cloudwatch_event_rule.this.arn}"
 }
 
-# DynamoDB
-resource "aws_dynamodb_table" "this" {
-  name           = "ChatWorkApiRateLimit"
-  read_capacity  = 1
-  write_capacity = 1
-  hash_key       = "ResetAt"
+# CloudWatch Log
+resource "aws_cloudwatch_log_group" "this" {
+  name = "ChatWorkAPI"
+}
 
-  attribute {
-    name = "ResetAt"
-    type = "S"
+resource "aws_cloudwatch_log_stream" "this" {
+  name           = "APIRemaining"
+  log_group_name = "${aws_cloudwatch_log_group.this.name}"
+}
+
+resource "aws_cloudwatch_log_metric_filter" "this" {
+  name           = "ChatWorkAPIRemaining"
+  pattern        = "[remaining]"
+  log_group_name = "${aws_cloudwatch_log_group.this.name}"
+
+  metric_transformation {
+    name      = "APIRemaining"
+    namespace = "ChatWork"
+    value     = "$remaining"
   }
+}
+
+resource "aws_cloudwatch_metric_alarm" "living_related_50x_critical" {
+  alarm_name          = "chatwork-api-remaining"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = "1"
+  metric_name         = "APIRemaining"
+  namespace           = "ChatWork"
+  period              = "900"
+  statistic           = "Minimum"
+  threshold           = "15"
+  alarm_description   = "This metric monitor API remaining"
 }
