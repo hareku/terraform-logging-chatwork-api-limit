@@ -9,21 +9,36 @@ exports.handler = async (event, context) => {
     const responseForWaiting = await axios.get('https://api.chatwork.com/v2/me')
     const nextResetUnixTime = Number(responseForWaiting.headers['x-ratelimit-reset'])
     const waitUnixTime = nextResetUnixTime - moment().tz('Asia/Tokyo').unix() - 10
-    await new Promise(resolve => setTimeout(resolve, waitUnixTime * 10))
+    await new Promise(resolve => setTimeout(resolve, waitUnixTime * 1000))
 
     const responseForLogging = await axios.get('https://api.chatwork.com/v2/me')
-    const limit = Number(responseForLogging.headers['x-ratelimit-limit'])
     const remaining = Number(responseForLogging.headers['x-ratelimit-remaining'])
 
-    const dbClient = new AWS.DynamoDB.DocumentClient()
-    await dbClient.put({
-        TableName: "ChatWorkApiRateLimit",
-        Item: {
-          ResetAt: moment.unix(nextResetUnixTime).tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ssZ'),
-          Remaining: remaining,
-          Called: limit - remaining
+    const putLogParams = {
+      logEvents: [
+        {
+          message: `${remaining}`,
+          timestamp: nextResetUnixTime * 1000
         }
-      }).promise()
+      ],
+      logGroupName: 'ChatWorkAPI',
+      logStreamName: 'APIRemaining'
+    }
+
+    const logsClient = new AWS.CloudWatchLogs()
+    const sequenceTokenIfError = await logsClient.putLogEvents(putLogParams).promise()
+      .catch(error => {
+        if (error && error.code === 'InvalidSequenceTokenException') {
+          // nextSequenceToken
+          return error.message.match(/[0-9]+/).pop()
+        }
+        return Promise.reject(error)
+      })
+
+    if (sequenceTokenIfError) {
+      putLogParams.sequenceToken = sequenceTokenIfError
+      await logsClient.putLogEvents(putLogParams).promise()
+    }
   } catch (error) {
     console.error(`[Error]: ${JSON.stringify(error)}`)
     return error
